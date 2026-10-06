@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="format-detection" content="telephone=no">
+<title>那个老吴 · 对战</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#1a1a1f;
+    font-family:"PingFang SC","Microsoft YaHei",sans-serif; user-select:none;
+    -webkit-user-select:none; touch-action:none; }
+  /* 背景交给 CSS 层：由 GPU 合成，省掉每帧缩放一张 1920x2560 大图的巨大开销 */
+  #bg { position:fixed; inset:0; z-index:0;
+    background:#2a2a30 center/cover no-repeat; }
+  #game { position:fixed; inset:0; width:100%; height:100%; display:block; z-index:1; }
+  .screen { position:fixed; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; z-index:10; padding:24px; }
+  .hidden { display:none !important; }
+  /* 原为 backdrop-filter:blur(3px)，安卓 WebView 上开销很大且几乎看不出效果，改为加深蒙层 */
+  .bg-tint { background:rgba(20,20,26,.6); }
+  h1.logo { font-size:52px; color:#fff; letter-spacing:6px; margin-bottom:8px;
+    text-shadow:0 4px 0 #e8734a, 0 8px 18px rgba(0,0,0,.5); }
+  .sub { color:#ffd9c9; font-size:15px; letter-spacing:3px; margin-bottom:48px; }
+  .btn { display:block; width:min(72vw,300px); padding:16px 0; margin:10px 0;
+    border:none; border-radius:16px; font-size:20px; font-weight:700; letter-spacing:4px;
+    color:#5a3210; background:linear-gradient(180deg,#ffd98e,#f5a742);
+    box-shadow:0 5px 0 #c97a28, 0 8px 16px rgba(0,0,0,.4); cursor:pointer; }
+  .btn:active { transform:translateY(3px); box-shadow:0 2px 0 #c97a28; }
+  .btn.ghost { background:rgba(255,255,255,.14); color:#fff;
+    box-shadow:0 5px 0 rgba(0,0,0,.3); }
+  .btn:disabled { filter:grayscale(.7); opacity:.5; }
+  .cat-cards { display:flex; gap:14px; margin:18px 0 26px; }
+  .cat-card { width:29vw; max-width:150px; border-radius:18px; padding:10px 8px 14px;
+    background:rgba(255,255,255,.1); border:3px solid transparent; text-align:center;
+    transition:border-color .15s, transform .15s; cursor:pointer; }
+  .cat-card img { width:100%; height:26vw; max-height:130px; object-fit:contain; }
+  .cat-card .nm { color:#fff; font-size:16px; font-weight:700; margin-top:6px; }
+  .cat-card .ds { color:#ffb08a; font-size:11px; margin-top:2px; }
+  .cat-card.sel { border-color:#ffd98e; transform:scale(1.06);
+    background:rgba(255,217,142,.18); }
+  .room-code { font-size:64px; font-weight:800; color:#ffd98e; letter-spacing:14px;
+    margin:20px 0; text-shadow:0 4px 12px rgba(0,0,0,.6); }
+  .hint { color:#ccc; font-size:14px; line-height:1.8; text-align:center; }
+  .code-input { width:min(72vw,300px); padding:14px; font-size:32px; text-align:center;
+    letter-spacing:12px; border-radius:14px; border:none; outline:none;
+    background:rgba(255,255,255,.92); color:#333; font-weight:700; margin-bottom:14px; }
+  .back { position:absolute; top:calc(env(safe-area-inset-top,0px) + 14px); left:16px;
+    color:#fff; font-size:15px; padding:8px 14px; background:rgba(255,255,255,.12);
+    border-radius:10px; cursor:pointer; }
+  #toast { position:fixed; top:18%; left:50%; transform:translateX(-50%);
+    background:rgba(0,0,0,.75); color:#ffd98e; padding:10px 22px; border-radius:12px;
+    font-size:16px; z-index:99; opacity:0; transition:opacity .25s; pointer-events:none; }
+  .result-emoji { font-size:76px; margin-bottom:10px; }
+  .result-emoji img { width:150px; height:150px; object-fit:contain;
+    filter:drop-shadow(0 6px 14px rgba(0,0,0,.55)); }
+  .result-text { font-size:34px; font-weight:800; color:#fff; letter-spacing:4px;
+    margin-bottom:36px; text-shadow:0 4px 14px rgba(0,0,0,.5); }
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<canvas id="game"></canvas>
+<div class="back hidden" id="btn-battle-back" style="z-index:20;">‹ 返回</div>
+
+<!-- 标题 -->
+<div id="screen-title" class="screen bg-tint">
+  <h1 class="logo">那个老吴</h1>
+  <div class="sub">喵出胜负 · 歪头保命</div>
+  <button class="btn" id="btn-start">开 始</button>
+</div>
+
+<!-- 模式选择 -->
+<div id="screen-mode" class="screen bg-tint hidden">
+  <h1 class="logo" style="font-size:34px;">选择模式</h1>
+  <div class="sub"></div>
+  <button class="btn" id="btn-mode-ai">人机对战</button>
+  <button class="btn" id="btn-mode-net">好友联机</button>
+  <button class="btn ghost" id="btn-mode-back">返 回</button>
+</div>
+
+<!-- 选猫 -->
+<div id="screen-select" class="screen bg-tint hidden">
+  <div class="back" id="btn-select-back">‹ 返回</div>
+  <h1 class="logo" style="font-size:34px;">选择你的猫</h1>
+  <div class="cat-cards" id="cat-cards"></div>
+  <button class="btn" id="btn-cat-ok" disabled>就 是 它</button>
+</div>
+
+<!-- 联机房间 -->
+<div id="screen-room" class="screen bg-tint hidden">
+  <div class="back" id="btn-room-back">‹ 返回</div>
+  <div id="room-menu">
+    <h1 class="logo" style="font-size:30px;">好友联机</h1>
+    <div class="sub"></div>
+    <button class="btn" id="btn-room-create">生成房间号</button>
+    <button class="btn" id="btn-room-join">加入房间</button>
+  </div>
+  <div id="room-generated" class="hidden" style="text-align:center;">
+    <div class="hint">把这个 4 位房间号告诉好友<br>（好友打开同一链接即可，不必在同一 WiFi）</div>
+    <div class="room-code" id="room-code-show">----</div>
+    <div class="hint">再在下面输入同一个号码，进入房间</div>
+  </div>
+  <div id="room-join" class="hidden" style="display:flex;flex-direction:column;align-items:center;">
+    <div class="hint" id="room-join-hint" style="margin-bottom:14px;">输入好友的 4 位房间号</div>
+    <input class="code-input" id="room-code-input" maxlength="4" inputmode="numeric" placeholder="0000">
+    <button class="btn" id="btn-room-go">加入房间</button>
+  </div>
+  <div id="room-wait" class="hidden" style="text-align:center;">
+    <div class="hint">房间号</div>
+    <div class="room-code" id="room-code-wait">----</div>
+    <div class="hint">等待好友加入…</div>
+  </div>
+</div>
+
+<!-- 结算 -->
+<div id="screen-result" class="screen bg-tint hidden">
+  <div class="result-emoji" id="result-emoji">🏆</div>
+  <div class="result-text" id="result-text">胜利</div>
+  <button class="btn" id="btn-again">再来一局</button>
+  <button class="btn ghost" id="btn-result-back">返 回</button>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* ================= 配置 ================= */
+const CATS = {
+  cat1: { name:'长条橘猫', dmg:10, cd:1.2, pitch:1.00, desc:'均衡 · 攻10 速中' },
+  cat3: { name:'炸毛橘猫', dmg:14, cd:1.7, pitch:0.78, desc:'重击 · 攻14 速慢' },
+};
+const MAX_HP = 100;
+const TILT_DEG = 25;          // 歪头角度
+const WAVE_FLY_MS = 380;      // 音波飞行时长
+
+/* ================= 资源 ================= */
+const ASSET_V = '2';                    // 资源版本号：换素材时 +1，配合长缓存自动刷新
+const A = p => `assets/${p}?v=${ASSET_V}`;
+const RES = { cats:{}, bg:null, attackBuf:null, defendBuf:null };
+function loadImg(src){ return new Promise((ok,no)=>{ const i=new Image();
+  i.onload=()=>ok(i); i.onerror=()=>no(new Error('加载失败 '+src)); i.src=src; }); }
+
+/* 背景与猫分开加载、各自兜底：低端机解码失败也只是少一张图，不会拖垮整个游戏 */
+function loadCats(){
+  return Promise.all(Object.keys(CATS).map(async n=>{
+    try {
+      const meta = await (await fetch(A(`cats/${n}.json`))).json();
+      const [body, head, full] = await Promise.all([
+        loadImg(A(`cats/${n}_body.webp`)),
+        loadImg(A(`cats/${n}_head.webp`)),
+        loadImg(A(`cats/${n}_full.webp`)),
+      ]);
+      RES.cats[n] = { meta, body, head, full };
+    } catch(e){ console.warn('[cat]', n, e); }
+  }));
+}
+function loadBg(){
+  return loadImg(A('bg.webp')).then(img=>{
+    RES.bg = img;
+    document.getElementById('bg').style.backgroundImage = `url("${img.src}")`;
+  }).catch(e=> console.warn('[bg]', e));
+}
+function loadAll(){
+  loadBg();          // 不 await：背景不阻塞开局，失败也有纯色底兜着
+  return loadCats();
+}
+
+/* ================= 音频 ================= */
+/* 手机浏览器 / 微信 / 抖音内置 WebView 都要求：音频必须在「真实用户手势」里解锁，
+   否则 AudioContext 一直是 suspended，播出来没有声音。
+   这里做双通道：主通道 Web Audio，兜底通道 <audio> 元素。 */
+let AC = null;
+const SND_SRC = { attack:A('laowu.mp3'), defend:A('nayige.mp3') };
+const SND = {};
+Object.keys(SND_SRC).forEach(k=>{
+  const el = new Audio(SND_SRC[k]);
+  el.preload = 'auto';
+  el.setAttribute('playsinline','');
+  el.setAttribute('webkit-playsinline','');
+  SND[k] = el;
+});
+
+function getAC(){
+  if (!AC){
+    const C = window.AudioContext || window.webkitAudioContext;
+    if (C){ try { AC = new C(); } catch(e){ AC = null; } }
+  }
+  return AC;
+}
+
+/* iOS（含 iPadOS）的静音拨片会静音 Web Audio，却不会静音 <audio> 元素，
+   所以 iOS 上优先用音频元素通道，避免「开着静音就没声」。 */
+const PREFER_AUDIO_EL = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+/* 在用户手势里解锁：恢复上下文 + 播 1 帧静音激活音频通道 + 试播兜底 <audio> */
+const UNLOCK_EVENTS = ['touchstart','touchend','pointerdown','mousedown','click','keydown'];
+function unlockAudio(){
+  const c = getAC();
+  if (c){
+    if (c.state === 'suspended') c.resume();
+    if (c.state === 'running' && !c._warm){
+      c._warm = true;
+      try {
+        const src = c.createBufferSource();
+        src.buffer = c.createBuffer(1, 1, c.sampleRate);
+        src.connect(c.destination); src.start(0);
+      } catch(e){}
+    }
+  }
+  Object.keys(SND).forEach(k=>{
+    const el = SND[k];
+    if (el._armed) return;
+    const p = el.play();
+    if (p && p.then){
+      /* 真正播出去才算解锁成功，失败则下次手势重试 */
+      p.then(()=>{ el._armed = true; try { el.pause(); el.currentTime = 0; } catch(e){} })
+       .catch(()=>{});
+    } else {
+      el._armed = true;
+      try { el.pause(); el.currentTime = 0; } catch(e){}
+    }
+  });
+  if (c && c.state === 'running'){
+    UNLOCK_EVENTS.forEach(ev => window.removeEventListener(ev, unlockAudio, true));
+  }
+}
+UNLOCK_EVENTS.forEach(ev => window.addEventListener(ev, unlockAudio, { capture:true, passive:true }));
+/* 微信内置浏览器：JS Bridge 就绪后再补一次解锁 */
+document.addEventListener('WeixinJSBridgeReady', unlockAudio, false);
+
+async function loadAudio(){
+  const c = getAC();
+  if (!c) return;
+  const [a, b] = await Promise.all([
+    fetch(A('laowu.mp3')).then(r => r.arrayBuffer()),   // 攻击音：老吴1
+    fetch(A('nayige.mp3')).then(r => r.arrayBuffer()),  // 歪头音：那个1
+  ]);
+  RES.attackBuf = await c.decodeAudioData(a);
+  RES.defendBuf = await c.decodeAudioData(b);
+}
+function playBuf(buf, key, vol){
+  if (!PREFER_AUDIO_EL && AC && AC.state === 'running' && buf){
+    const s = AC.createBufferSource();
+    s.buffer = buf;
+    const g = AC.createGain(); g.gain.value = vol == null ? 0.9 : vol;
+    s.connect(g); g.connect(AC.destination); s.start();
+    return;
+  }
+  /* 兜底/ iOS 主通道：用 <audio> 元素播，不受静音拨片影响 */
+  const el = key && SND[key];
+  if (!el) return;
+  try { el.currentTime = 0; } catch(e){}
+  el.volume = vol == null ? 0.9 : vol;
+  const p = el.play();
+  if (p && p.catch) p.catch(()=>{});
+}
+
+/* ================= 画布 ================= */
+const cv = document.getElementById('game');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W*DPR; cv.height = H*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize); resize();
+
+/* 联机服务器地址：
+   留空 = 自动（与页面同源，服务端把静态资源和 WebSocket 放在同一个端口）。
+   仅当把联机服务单独部署到另一台机器时才需要填写，例如：
+     const WS_ENDPOINT = 'wss://your-domain.com/';
+     const WS_ENDPOINT = 'ws://123.45.67.89:8000';
+   注意：https 页面必须用 wss://，否则浏览器会拦截混合内容。 */
+const WS_ENDPOINT = '';
+function wsUrl(){
+  if (WS_ENDPOINT) return WS_ENDPOINT;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${location.host}`;
+}
+
+/* ================= 网络 ================= */
+const net = {
+  ws:null, connected:false, seat:-1, room:null, token:null, handlers:{}, _p:null, _ka:0,
+  connect(){
+    if (this.ws && this.ws.readyState === 1) return Promise.resolve();
+    if (this._p) return this._p;              // 正在连接中，复用同一个请求
+    this._p = new Promise((ok, no)=>{
+      let ws;
+      try { ws = new WebSocket(wsUrl()); }
+      catch(e){ this._p = null; no(new Error('无法连接对战服务器')); return; }
+      this.ws = ws;
+      ws.onopen = ()=>{
+        if (this.ws !== ws) return;           // 已被更新的连接取代，忽略
+        this._p = null; this.connected = true;
+        this.startKeepAlive();
+        ok();
+      };
+      ws.onerror = ()=>{
+        if (this.ws !== ws) return;
+        this._p = null;
+        no(new Error('无法连接对战服务器'));
+      };
+      ws.onclose = ()=>{
+        if (this.ws !== ws) return;           // 旧连接的回调，忽略
+        this._p = null; this.connected = false;
+        this.stopKeepAlive();
+        if (this.handlers.close) this.handlers.close();
+      };
+      ws.onmessage = e=>{
+        let d; try { d = JSON.parse(e.data); } catch { return; }
+        const h = this.handlers[d.t];
+        if (h) h(d);
+      };
+    });
+    return this._p;
+  },
+  send(o){
+    if (this.ws && this.ws.readyState === 1) { this.ws.send(JSON.stringify(o)); return true; }
+    return false;                             // 连接已断：调用方要给出提示，不能静默丢弃
+  },
+  on(t, fn){ this.handlers[t] = fn; },
+  clearHandlers(){ this.handlers = {}; },
+  startKeepAlive(){
+    this.stopKeepAlive();
+    /* 手机流量下空闲连接会被运营商/浏览器掐断，定期 ping 一下续命 */
+    this._ka = setInterval(()=>{
+      if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ t:'ping' }));
+    }, 20000);
+  },
+  stopKeepAlive(){ if (this._ka) { clearInterval(this._ka); this._ka = 0; } },
+  /* 从后台切回来时连接通常已经断了：自动重连并回到原房间 */
+  resume(){
+    if (!this.room || !this.token) return;
+    if (this.ws && this.ws.readyState === 1) return;
+    this.connect()
+      .then(()=> this.send({ t:'rejoin', room:this.room, token:this.token }))
+      .catch(()=>{});
+  },
+};
+
+/* 手机切回前台 / 从 bfcache 恢复：重连 */
+document.addEventListener('visibilitychange', ()=>{
+  if (document.visibilityState === 'visible') net.resume();
+});
+window.addEventListener('pageshow', ()=> net.resume());
+
+/* 确保连接可用；失败时明确提示，而不是让请求凭空消失 */
+async function netReady(){
+  try { await net.connect(); return true; }
+  catch(e){ toast('连不上对战服务器，请检查网络后重试'); return false; }
+}
+
+/* ================= 战斗状态 ================= */
+const battle = {
+  active:false, mode:'ai', mySeat:0,
+  cats:['cat1','cat3'], hp:[MAX_HP, MAX_HP],
+  defending:[false,false], headTilt:[0,0],
+  lastAtk:[-9,-9], lunge:[0,0], lungeDir:[1,-1],
+  flash:[0,0], shield:[0,0],
+  waves:[], texts:[], shake:0, over:false, winner:-1,
+  aiTimer:0, aiDefendUntil:0, now:0, defendSnd:0,
+};
+
+function seatSpec(seat){ return CATS[battle.cats[seat]]; }
+
+/* 站位：本地玩家永远左下(seat 视角)，对手右上 */
+function slotPos(slot){ // slot 0 = 左下(我), 1 = 右上(对手)
+  if (slot === 0) return { x: W*0.30, y: H*0.66, w: W*0.56, faceRight:true  };
+  return             { x: W*0.72, y: H*0.30, w: W*0.44, faceRight:false };
+}
+function seatSlot(seat){ return seat === battle.mySeat ? 0 : 1; }
+
+function mouthPos(seat){
+  const s = slotPos(seatSlot(seat));
+  return { x: s.x + (s.faceRight ? s.w*0.30 : -s.w*0.30), y: s.y - s.w*0.22 };
+}
+
+/* ---- 攻击 ---- */
+function tryAttack(){
+  if (!battle.active || battle.over) return;
+  const now = battle.now;
+  const spec = seatSpec(battle.mySeat);
+  if (now - battle.lastAtk[battle.mySeat] < spec.cd) return;
+  if (battle.defending[battle.mySeat]) return;   // 歪头中不能攻击
+  battle.lastAtk[battle.mySeat] = now;
+  if (battle.mode === 'net') net.send({ t:'attack' });
+  startAttack(battle.mySeat);                    // 本地立即表现
+  if (battle.mode === 'ai') resolveAttack(battle.mySeat);
+}
+function startAttack(seat){
+  battle.lunge[seat] = 1;
+  playBuf(RES.attackBuf, 'attack');   // 攻击：老吴1，一次
+  const from = mouthPos(seat);
+  const to = mouthPos(1-seat);
+  battle.waves.push({ from, to, t0:battle.now, dur:WAVE_FLY_MS/1000, seat });
+}
+function resolveAttack(atkSeat){
+  /* 仅人机模式本地结算；联机由服务器 event 结算 */
+  const def = 1 - atkSeat;
+  const blocked = battle.defending[def];
+  const dmg = blocked ? 0 : seatSpec(atkSeat).dmg;
+  setTimeout(()=>applyHit(atkSeat, blocked, dmg), WAVE_FLY_MS);
+}
+function applyHit(atkSeat, blocked, dmg, hpArr){
+  const def = 1 - atkSeat;
+  if (hpArr) { battle.hp[0]=hpArr[0]; battle.hp[1]=hpArr[1]; }
+  else battle.hp[def] = Math.max(0, battle.hp[def] - dmg);
+  if (blocked) {
+    battle.shield[def] = 1;
+    addText(def, '格挡!', '#8fd8ff');
+  } else {
+    battle.flash[def] = 1;
+    battle.shake = Math.min(12, 5 + dmg*0.5);
+    addText(def, '-'+dmg, '#ff5f4d');
+  }
+  if (battle.hp[def] <= 0 && !battle.over) endBattle(atkSeat);
+}
+function addText(seat, str, color){
+  const s = slotPos(seatSlot(seat));
+  battle.texts.push({ x:s.x, y:s.y - s.w*0.42, str, color, life:1 });
+}
+function endBattle(winner){
+  battle.over = true; battle.winner = winner;
+  setTimeout(()=>{
+    battle.active = false;
+    showResult(winner === battle.mySeat);
+  }, 900);
+}
+
+/* ---- 防御 ---- */
+function setDefend(on){
+  if (!battle.active || battle.over) return;
+  if (battle.defending[battle.mySeat] === on) return;
+  battle.defending[battle.mySeat] = on;
+  if (battle.mode === 'net') net.send({ t:'defend', on });
+}
+
+/* ---- 人机 AI ---- */
+function aiTick(dt){
+  const ai = 1 - battle.mySeat;
+  if (battle.over) return;
+  /* 玩家起手的瞬间，AI 概率歪头（startAttack 里音波刚出现） */
+  for (const w of battle.waves) {
+    if (w.seat !== ai && !w.aiReacted) {
+      w.aiReacted = true;
+      if (Math.random() < 0.45 && !battle.defending[ai]) {
+        setTimeout(()=>{
+          if (battle.active && !battle.over) {
+            battle.defending[ai] = true;
+            battle.aiDefendUntil = battle.now + 0.5 + Math.random()*0.7;
+          }
+        }, 120 + Math.random()*180);
+      }
+    }
+  }
+  if (battle.defending[ai] && battle.now > battle.aiDefendUntil)
+    battle.defending[ai] = false;
+  battle.aiTimer -= dt;
+  if (battle.aiTimer <= 0) {
+    battle.aiTimer = 1.1 + Math.random()*1.5;
+    const spec = seatSpec(ai);
+    if (!battle.defending[ai] && battle.now - battle.lastAtk[ai] >= spec.cd) {
+      battle.lastAtk[ai] = battle.now;
+      startAttack(ai);
+      resolveAttack(ai);
+    }
+  }
+}
+
+/* ================= 渲染 ================= */
+function drawCat(seat){
+  const name = battle.cats[seat];
+  const r = RES.cats[name]; if (!r) return;
+  const slot = slotPos(seatSlot(seat));
+  const meta = r.meta;
+  const scale = slot.w / meta.w;
+  const breathe = 1 + Math.sin(battle.now*2.2 + seat)*0.012;
+
+  /* 水平镜像：站位朝向与素材朝向相反时翻转 */
+  const flip = (meta.facing === 'left') === slot.faceRight;
+
+  /* lunge 位移 */
+  const lg = battle.lunge[seat];
+  const lungeOff = lg > 0 ? Math.sin((1-lg)*Math.PI) * W*0.045 : 0;
+  const dx = (slot.faceRight ? 1 : -1) * lungeOff;
+
+  /* 受击抖动 */
+  const fl = battle.flash[seat];
+  const jx = fl > 0 ? (Math.random()-0.5)*10*fl : 0;
+  const jy = fl > 0 ? (Math.random()-0.5)*8*fl : 0;
+
+  ctx.save();
+  ctx.translate(slot.x + dx + jx, slot.y + jy);
+  if (flip) ctx.scale(-1, 1);
+  ctx.scale(scale, scale*breathe);
+  const ox = -meta.w/2, oy = -meta.h*0.86;   // 锚点：身体中下部（脚踩地）
+
+  ctx.drawImage(r.body, ox, oy);
+
+  /* 头部：绕 pivot 旋转（歪头） */
+  const tilt = battle.headTilt[seat] * TILT_DEG * Math.PI/180;
+  const pxx = meta.pivot[0] + ox, pxy = meta.pivot[1] + oy;
+  ctx.translate(pxx, pxy);
+  ctx.rotate(flip ? -tilt : tilt);
+  ctx.translate(-pxx, -pxy);
+  ctx.drawImage(r.head, ox, oy);
+  ctx.restore();
+
+  /* 受击红晕 */
+  if (fl > 0) {
+    ctx.save();
+    ctx.globalAlpha = fl*0.4;
+    ctx.fillStyle = '#ff3b2f';
+    ctx.beginPath();
+    ctx.ellipse(slot.x+dx, slot.y-slot.w*0.24, slot.w*0.5, slot.w*0.4, 0, 0, 7);
+    ctx.fill();
+    ctx.restore();
+  }
+  /* 格挡弧光 */
+  if (battle.shield[seat] > 0) {
+    ctx.save();
+    ctx.globalAlpha = battle.shield[seat];
+    ctx.strokeStyle = '#8fd8ff'; ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(slot.x, slot.y - slot.w*0.24, slot.w*0.52, 0, 7);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+function drawWaves(){
+  for (const w of battle.waves) {
+    const p = Math.min(1, (battle.now - w.t0)/w.dur);
+    const x = w.from.x + (w.to.x - w.from.x)*p;
+    const y = w.from.y + (w.to.y - w.from.y)*p - Math.sin(p*Math.PI)*H*0.02;
+    ctx.save();
+    ctx.globalAlpha = 1 - p*0.55;
+    ctx.strokeStyle = '#fff'; ctx.lineCap='round';
+    for (let i=0;i<3;i++){
+      const rr = 8 + i*9 + p*10;
+      ctx.lineWidth = 4 - i;
+      ctx.beginPath();
+      ctx.arc(x, y, rr, -0.9, 0.9);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+function drawHP(){
+  const pad = 14, bw = (W - pad*2 - 60)/2, bh = 16;
+  const y = 14 + (window.visualViewport ? 0 : 0);
+  const safeTop = 14;
+  const my = battle.hp[battle.mySeat]/MAX_HP;
+  const op = battle.hp[1-battle.mySeat]/MAX_HP;
+  function bar(x, ratio, alignRight){
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,.45)';
+    ctx.beginPath(); ctx.roundRect(x, safeTop, bw, bh, 8); ctx.fill();
+    const gw = bw*ratio;
+    const gx = alignRight ? x + bw - gw : x;
+    const grad = ctx.createLinearGradient(x,0,x+bw,0);
+    grad.addColorStop(0,'#ff9a3d'); grad.addColorStop(1,'#ffd93d');
+    ctx.fillStyle = grad;
+    if (gw > 0.5){ ctx.beginPath(); ctx.roundRect(gx, safeTop, gw, bh, 8); ctx.fill(); }
+    ctx.restore();
+  }
+  bar(pad, my, false);
+  bar(pad + bw + 60, op, true);
+  ctx.fillStyle = '#fff';
+  ctx.font = '700 18px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('VS', W/2, safeTop + bh/2);
+}
+/* 按钮（Canvas 绘制，触摸命中自算 —— 迁移小游戏友好） */
+const BTN = {
+  defend:{ x:0.26, y:0.885, r:0.105, label:'歪头' },
+  attack:{ x:0.74, y:0.885, r:0.105, label:'喵!' },
+};
+function btnRect(b){
+  return { x: b.x*W, y: b.y*H, r: b.r*Math.min(W,H)*1.35 };
+}
+function drawButtons(){
+  const now = battle.now;
+  for (const key of ['defend','attack']) {
+    const b = btnRect(BTN[key]);
+    let fill = 'rgba(0,0,0,.5)', ring = '#ffd98e';
+    if (key === 'attack') {
+      const spec = seatSpec(battle.mySeat);
+      const cdLeft = Math.max(0, spec.cd - (now - battle.lastAtk[battle.mySeat]));
+      const ratio = cdLeft / spec.cd;
+      ctx.save();
+      ctx.fillStyle = fill; ctx.strokeStyle = ring; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 7); ctx.fill(); ctx.stroke();
+      if (ratio > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,.55)';
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y);
+        ctx.arc(b.x, b.y, b.r, -Math.PI/2, -Math.PI/2 + ratio*Math.PI*2);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = ratio > 0 ? '#999' : '#ffd98e';
+      ctx.font = `800 ${Math.round(b.r*0.52)}px sans-serif`;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('喵!', b.x, b.y);
+      ctx.restore();
+    } else {
+      const on = battle.defending[battle.mySeat];
+      ctx.save();
+      ctx.fillStyle = on ? 'rgba(143,216,255,.4)' : fill;
+      ctx.strokeStyle = on ? '#8fd8ff' : ring; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = on ? '#8fd8ff' : '#fff';
+      ctx.font = `700 ${Math.round(b.r*0.34)}px sans-serif`;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('歪头', b.x, b.y - b.r*0.14);
+      ctx.font = `400 ${Math.round(b.r*0.2)}px sans-serif`;
+      ctx.fillText(on ? '防御中' : '按住', b.x, b.y + b.r*0.3);
+      ctx.restore();
+    }
+  }
+}
+function drawTexts(){
+  for (const t of battle.texts) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, t.life*2);
+    ctx.fillStyle = t.color;
+    ctx.font = '800 26px sans-serif';
+    ctx.textAlign='center';
+    ctx.strokeStyle='rgba(0,0,0,.6)'; ctx.lineWidth=4;
+    ctx.strokeText(t.str, t.x, t.y);
+    ctx.fillText(t.str, t.x, t.y);
+    ctx.restore();
+  }
+}
+function render(){
+  ctx.clearRect(0,0,W,H);          // 背景由 #bg 这层 CSS 负责，canvas 只画场景
+  if (!battle.active) return;
+
+  ctx.save();
+  if (battle.shake > 0.3)
+    ctx.translate((Math.random()-0.5)*battle.shake, (Math.random()-0.5)*battle.shake);
+  /* 远(对手)先画，近(我)后画 */
+  drawCat(1-battle.mySeat);
+  drawCat(battle.mySeat);
+  drawWaves();
+  ctx.restore();
+
+  drawHP();
+  drawTexts();
+  drawButtons();
+}
+
+/* ================= 主循环 ================= */
+/* 只在战斗进行时跑 rAF：菜单界面没有任何动画，空转会让手机白白耗电、发热、掉帧 */
+let lastTs = 0, rafId = 0;
+function loop(ts){
+  const dt = Math.min(0.05, (ts - lastTs)/1000 || 0);
+  lastTs = ts;
+  if (battle.active) {
+    battle.now += dt;
+    for (let i=0;i<2;i++){
+      const target = battle.defending[i] ? 1 : 0;
+      battle.headTilt[i] += (target - battle.headTilt[i]) * Math.min(1, dt*10);
+      battle.lunge[i] = Math.max(0, battle.lunge[i] - dt*3.2);
+      battle.flash[i] = Math.max(0, battle.flash[i] - dt*3);
+      battle.shield[i] = Math.max(0, battle.shield[i] - dt*2.2);
+    }
+    /* 歪头防御：每 3 秒播放一次“那个1” */
+    if (battle.defending[battle.mySeat]) {
+      battle.defendSnd -= dt;
+      if (battle.defendSnd <= 0) { playBuf(RES.defendBuf, 'defend'); battle.defendSnd = 3; }
+    } else {
+      battle.defendSnd = 0;   // 下次歪头立即播放
+    }
+    battle.waves = battle.waves.filter(w => battle.now - w.t0 < w.dur + 0.1);
+    for (const t of battle.texts){ t.life -= dt*1.1; t.y -= dt*46; }
+    battle.texts = battle.texts.filter(t => t.life > 0);
+    battle.shake *= Math.pow(0.001, dt);
+    if (battle.mode === 'ai') aiTick(dt);
+  }
+  render();
+  rafId = battle.active ? requestAnimationFrame(loop) : 0;
+}
+function startLoop(){
+  if (rafId) return;
+  lastTs = 0;                       // 重置时间基准，避免暂停后 dt 跳变
+  rafId = requestAnimationFrame(loop);
+}
+
+/* ================= 输入 ================= */
+const activeTouches = new Map(); // touchId -> 'attack'|'defend'
+function hitBtn(x, y){
+  for (const key of ['defend','attack']) {
+    const b = btnRect(BTN[key]);
+    const d = Math.hypot(x-b.x, y-b.y);
+    if (d <= b.r*1.15) return key;
+  }
+  return null;
+}
+function onDown(x, y, id){
+  if (!battle.active) return;
+  const k = hitBtn(x, y);
+  if (k === 'attack') { tryAttack(); activeTouches.set(id, 'attack'); }
+  else if (k === 'defend') { setDefend(true); activeTouches.set(id, 'defend'); }
+}
+function onUp(id){
+  const k = activeTouches.get(id);
+  if (k === 'defend') setDefend(false);
+  activeTouches.delete(id);
+}
+cv.addEventListener('touchstart', e=>{ e.preventDefault();
+  for (const t of e.changedTouches) onDown(t.clientX, t.clientY, t.identifier);
+}, { passive:false });
+cv.addEventListener('touchend', e=>{ e.preventDefault();
+  for (const t of e.changedTouches) onUp(t.identifier);
+}, { passive:false });
+cv.addEventListener('touchcancel', e=>{
+  for (const t of e.changedTouches) onUp(t.identifier);
+});
+cv.addEventListener('mousedown', e=> onDown(e.clientX, e.clientY, 'mouse'));
+window.addEventListener('mouseup', ()=> onUp('mouse'));
+document.addEventListener('touchmove', e=> e.preventDefault(), { passive:false });
+
+/* ================= UI 流程 ================= */
+const $ = id => document.getElementById(id);
+const screens = ['screen-title','screen-mode','screen-select','screen-room','screen-result'];
+function show(id){
+  screens.forEach(s => $(s).classList.toggle('hidden', s !== id));
+  if (!id) screens.forEach(s => $(s).classList.add('hidden'));
+  /* 对局内的返回键只在战斗界面（无 DOM 面板）时显示 */
+  $('btn-battle-back').classList.toggle('hidden', !!id);
+}
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(t._tm); t._tm = setTimeout(()=> t.style.opacity = 0, 2200);
+}
+
+let mode = 'ai';
+let selCat = null;
+
+/* 选猫卡片 */
+function buildCatCards(){
+  const box = $('cat-cards'); box.innerHTML = '';
+  for (const [k, c] of Object.entries(CATS)) {
+    const div = document.createElement('div');
+    div.className = 'cat-card' + (selCat === k ? ' sel' : '');
+    div.innerHTML = `<img src="${A(`cats/${k}_full.webp`)}" alt="${c.name}">
+      <div class="nm">${c.name}</div><div class="ds">${c.desc}</div>`;
+    div.onclick = ()=>{ selCat = k; $('btn-cat-ok').disabled = false; buildCatCards(); };
+    box.appendChild(div);
+  }
+}
+
+$('btn-start').onclick = ()=> show('screen-mode');
+$('btn-mode-back').onclick = ()=> show('screen-title');
+$('btn-mode-ai').onclick = ()=>{ mode = 'ai'; selCat = null;
+  $('btn-cat-ok').disabled = true; buildCatCards(); show('screen-select'); };
+$('btn-mode-net').onclick = ()=>{
+  mode = 'net';
+  net.connect().then(()=>{
+    selCat = null; $('btn-cat-ok').disabled = true; buildCatCards(); show('screen-select');
+  }).catch(e=> toast(e.message + '，请确认已启动 server.py'));
+};
+$('btn-cat-ok').onclick = ()=>{
+  if (!selCat) return;
+  if (mode === 'ai') {
+    const others = Object.keys(CATS).filter(k => k !== selCat);
+    const aiCat = others[Math.floor(Math.random()*others.length)];
+    startBattle('ai', 0, [selCat, aiCat]);
+  } else {
+    show('screen-room');
+    resetRoomPanels();
+  }
+};
+
+/* ---- 房间 ---- */
+/* 回到「生成房间号 / 加入房间」的初始界面 */
+function resetRoomPanels(){
+  $('room-menu').classList.remove('hidden');
+  $('room-generated').classList.add('hidden');
+  $('room-wait').classList.add('hidden');
+  $('room-join').classList.add('hidden');
+  $('room-code-input').value = '';
+  $('room-join-hint').textContent = '输入好友的 4 位房间号';
+}
+function showJoinInput(hint){
+  $('room-join-hint').textContent = hint;
+  $('room-join').classList.remove('hidden');
+  $('room-code-input').value = '';
+  setTimeout(()=> $('room-code-input').focus(), 100);
+}
+
+$('btn-room-back').onclick = ()=>{ leaveRoom(); show('screen-select'); };
+/* 生成房间号：拿到号码后不直接进房间，需要自己去「加入房间」输入这个号码 */
+$('btn-room-create').onclick = async ()=>{
+  net.clearHandlers(); bindNet();
+  net.room = null; net.token = null;
+  if (!await netReady()) return;
+  if (!net.send({ t:'create' })) toast('连接已断开，请再试一次');
+};
+$('btn-room-join').onclick = ()=>{
+  $('room-menu').classList.add('hidden');
+  $('room-generated').classList.add('hidden');
+  showJoinInput('输入好友的 4 位房间号');
+};
+$('btn-room-go').onclick = async ()=>{
+  const code = $('room-code-input').value.trim();
+  if (!/^\d{4}$/.test(code)) { toast('请输入 4 位房间号'); return; }
+  net.clearHandlers(); bindNet();
+  if (!await netReady()) return;
+  if (!net.send({ t:'join', room:code, cat:selCat })) toast('连接已断开，请再试一次');
+};
+
+function bindNet(){
+  /* 生成房间号：只显示号码，人还没进房间 */
+  net.on('created', d=>{
+    $('room-menu').classList.add('hidden');
+    $('room-wait').classList.add('hidden');
+    $('room-generated').classList.remove('hidden');
+    $('room-code-show').textContent = d.room;
+    showJoinInput('输入刚刚拿到的 4 位房间号');
+  });
+  /* 进入房间成功：显示器等着，两个人齐了就自动开局 */
+  net.on('joined', d=>{
+    net.seat = d.seat; net.room = d.room; net.token = d.token;
+    $('room-menu').classList.add('hidden');
+    $('room-generated').classList.add('hidden');
+    $('room-join').classList.add('hidden');
+    $('room-wait').classList.remove('hidden');
+    $('room-code-wait').textContent = d.room;
+  });
+  net.on('error', d=> toast(d.msg));
+  /* 重连回来：对局已开始就续上，否则回到等待房间 */
+  net.on('rejoined', d=>{
+    net.seat = d.seat; net.room = d.room;
+    if (d.started && d.cats && d.cats[0] && d.cats[1]) {
+      startBattle('net', d.seat, d.cats);
+      battle.hp = [...d.hp];
+    } else {
+      show('screen-room');
+      $('room-menu').classList.add('hidden');
+      $('room-generated').classList.add('hidden');
+      $('room-join').classList.add('hidden');
+      $('room-wait').classList.remove('hidden');
+      $('room-code-wait').textContent = d.room;
+    }
+  });
+  net.on('rejoin_failed', d=>{
+    net.room = null; net.token = null;
+    toast(d.msg || '房间已过期');
+    show('screen-room');
+    resetRoomPanels();
+  });
+  net.on('start', d=>{
+    startBattle('net', net.seat, d.cats);
+  });
+  net.on('event', d=>{
+    if (d.action === 'attack') {
+      battle.lastAtk[d.seat] = battle.now;
+      startAttack(d.seat);
+      setTimeout(()=>{ if (battle.active) applyHit(d.seat, d.blocked, d.dmg, d.hp); }, WAVE_FLY_MS);
+    } else if (d.action === 'defend') {
+      battle.defending[d.seat] = d.on;
+    }
+  });
+  net.on('gameover', d=>{ if (!battle.over) endBattle(d.winner); });
+  net.on('opp_left', ()=>{
+    if (battle.active) { battle.active = false; toast('对手已离开'); show('screen-title'); }
+    else toast('对手已离开房间');
+  });
+  net.on('close', ()=>{
+    /* 还在房间里：多半只是手机切后台导致断线，交给自动重连，别打断这局 */
+    if (net.room && net.token) { setTimeout(()=> net.resume(), 500); return; }
+    if (battle.active && battle.mode==='net') {
+      battle.active = false; toast('连接已断开'); show('screen-title'); }
+  });
+}
+
+/* 主动退出房间（其余地方都用这个，顺便清掉重连信息） */
+function leaveRoom(){ net.send({ t:'leave' }); net.room = null; net.token = null; }
+
+/* ---- 开始/结束 ---- */
+function startBattle(m, mySeat, cats){
+  mode = m;
+  Object.assign(battle, {
+    active:true, mode:m, mySeat,
+    cats:[...cats], hp:[MAX_HP,MAX_HP],
+    defending:[false,false], headTilt:[0,0],
+    lastAtk:[-9,-9], lunge:[0,0], flash:[0,0], shield:[0,0],
+    waves:[], texts:[], shake:0, over:false, winner:-1,
+    aiTimer:1.6, aiDefendUntil:0, now:0, defendSnd:0,
+  });
+  show(null);
+  unlockAudio();
+  startLoop();
+}
+function showResult(win){
+  const cat = selCat || Object.keys(CATS)[0];
+  $('result-emoji').innerHTML = `<img src="${A(`cats/${cat}_full.webp`)}" alt="${CATS[cat].name}">`;
+  $('result-text').textContent = win ? '我去有实力' : '绷不住了菜狗';
+  show('screen-result');
+}
+$('btn-again').onclick = ()=>{
+  if (mode === 'ai') {
+    const others = Object.keys(CATS).filter(k => k !== selCat);
+    startBattle('ai', 0, [selCat, others[Math.floor(Math.random()*others.length)]]);
+  } else {
+    leaveRoom();    // 退出上一局的房间，避免旧房间残留
+    show('screen-room');
+    resetRoomPanels();
+  }
+};
+/* 返回：回到模式选择，可重新选单机/联机、重新选猫 */
+$('btn-result-back').onclick = ()=>{
+  if (mode === 'net') leaveRoom();
+  show('screen-mode');
+};
+/* 选猫页返回：回到模式选择 */
+$('btn-select-back').onclick = ()=> show('screen-mode');
+/* 对局内返回：中途退出本局 */
+$('btn-battle-back').onclick = ()=>{
+  if (battle.mode === 'net') leaveRoom();
+  battle.active = false;
+  show('screen-mode');
+};
+
+/* ================= 启动 ================= */
+loadAll().then(()=> console.log('assets ready')).catch(e=> console.error(e));
+loadAudio().catch(e=> console.warn('audio', e));
+</script>
+</body>
+</html>
