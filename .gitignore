@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 编辑器
+.idea/
+.vscode/
+.DS_Store
+
+# 原始素材 / 开发中间产物（体积大，不入库）
+微信图片_*.jpg
+老吴1.mp4
+那个1.mp4
+TapNow_*.jpg
+audio.wav
+tools/preview/
+
+# 运行日志
+*.log
