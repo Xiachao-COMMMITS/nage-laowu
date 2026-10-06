@@ -63,11 +63,8 @@ def push_branch(owner, repo, branch, files, message):
         tree.append({"path": repo_path, "mode": "100644", "type": "blob", "sha": sha})
 
     parent = get_ref_sha(owner, repo, branch)
-    tree_body = {"tree": tree}
-    if parent:
-        base_tree = api("GET", f"/repos/{owner}/{repo}/git/commits/{parent}")["tree"]["sha"]
-        tree_body["base_tree"] = base_tree
-    new_tree = api("POST", f"/repos/{owner}/{repo}/git/trees", tree_body)["sha"]
+    # 不带 base_tree：整棵树直接替换，保证仓库内容与本地目录一致，不会残留上一次的旧文件
+    new_tree = api("POST", f"/repos/{owner}/{repo}/git/trees", {"tree": tree})["sha"]
 
     commit = api("POST", f"/repos/{owner}/{repo}/git/commits",
                  {"message": message, "tree": new_tree,
@@ -129,8 +126,8 @@ def main():
 
     ensure_initialized(owner, REPO, DEFAULT_BRANCH)
 
-    # 2) main 分支：源码
-    source = list(public)  # 保持 public/ 前缀
+    # 2) main 分支：源码（保持 public/ 前缀，与本地目录结构一致）
+    source = [(f"public/{rel}", p) for rel, p in public]
     for name in ("server.py", "requirements.txt", "README.md", "Dockerfile", ".gitignore"):
         p = ROOT / name
         if p.exists():
